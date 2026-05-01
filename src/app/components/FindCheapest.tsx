@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { MessageCircle, Star } from 'lucide-react';
+import { Filter, MessageCircle, Star } from 'lucide-react';
 import { AppContextType, Station } from '../App';
 import { BottomNav } from './BottomNav';
 import { FilterPills } from './FilterPills';
@@ -8,12 +8,10 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useGasStations } from '../../hooks/useGasStations';
 
-
-
 export function FindCheapest({ context }: { context: AppContextType }) {
   const { getCheapest } = useGasStations();
   const sortedStations = getCheapest(); // This is already sorted by price
-  const [radius, setRadius] = useState('5');
+  const [range, setRange] = useState('10');
   const [favorites, setFavorites] = useState<Set<string>>(() => {
   const saved = localStorage.getItem('gas_favorites');
   return saved ? new Set(JSON.parse(saved)) : new Set();
@@ -26,73 +24,79 @@ export function FindCheapest({ context }: { context: AppContextType }) {
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
 
   // 2. Derive the stations to show
-  const filteredStations = sortedStations.filter(station => {
-    if (activeFilter === 'All') return true;
-    
-    // Check if the station name matches the brand filter OR if the tags contain the filter (like "Car Wash")
-    return station.name.includes(activeFilter) || station.tags.includes(activeFilter);
+  // 1. Parse distance string (e.g., "10") into a number
+  const maxDistance = parseFloat(range) || 0;
+
+const displayStations = sortedStations.filter(station => {
+  // A: Distance Logic
+  const stationDist = parseFloat(station.distance.split(' ')[0]);
+  const isWithinRange = stationDist <= maxDistance;
+  
+  // B: Name/Tag Logic
+  // This checks if the station name or any of its tags match the active pill
+  const matchesFilter = activeFilter === 'All' || 
+                       station.name.includes(activeFilter) || 
+                       station.tags.includes(activeFilter);
+
+  // Both MUST be true to show the station
+  return isWithinRange && matchesFilter;
+});
+// 1. EFFECT: Initialize the Map (Runs ONLY once on mount)
+useEffect(() => {
+  if (!mapRef.current || mapInstanceRef.current) return;
+
+  const map = L.map(mapRef.current).setView([31.7765, -106.5012], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+  
+  mapInstanceRef.current = map;
+  markersLayerRef.current = L.layerGroup().addTo(map);
+
+  return () => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+    }
+  };
+}, []); // Empty array = run only once
+
+// 2. EFFECT: Update Markers (Runs every time displayStations changes)
+useEffect(() => {
+  // Guard: We need the map and the layer to exist before drawing
+  if (!mapInstanceRef.current || !markersLayerRef.current) return;
+
+  const markersLayer = markersLayerRef.current;
+  markersLayer.clearLayers(); // Wipe old markers
+
+  const gasIcon = L.divIcon({
+    className: 'custom-gas-marker',
+    html: '<div style="background-color: #F15025; color: white; padding: 4px 8px; border-radius: 6px; font-size: 11px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></div>',
+    iconSize: [60, 24],
+    iconAnchor: [30, 12],
   });
 
-  useEffect(() => {
-    console.log("Effect used");
-    if (!mapRef.current) return;
+  displayStations.forEach((station) => {
+    const marker = L.marker([station.lat, station.lng], { icon: gasIcon });
 
-    // 1. Initialize Map & LayerGroup once
-    if (!mapInstanceRef.current) {
-      const map = L.map(mapRef.current).setView([31.7765, -106.5012], 13);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap'
-      }).addTo(map);
-      
-      mapInstanceRef.current = map;
-      markersLayerRef.current = L.layerGroup().addTo(map);
-    }
-
-    const markersLayer = markersLayerRef.current;
-    if (!markersLayer) return;
-
-    // 2. Clear old markers before redrawing
-    markersLayer.clearLayers();
-
-    const gasIcon = L.divIcon({
-      className: 'custom-gas-marker',
-      html: '<div style="background-color: #F15025; color: white; padding: 4px 8px; border-radius: 6px; font-size: 11px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></div>',
-      iconSize: [60, 24],
-      iconAnchor: [30, 12],
-    });
-
-    // 3. Add markers with an 'add' listener for the label
-    filteredStations.forEach((station) => {
-      const marker = L.marker([station.lat, station.lng], { icon: gasIcon });
-
-      // This ensures the element exists before we try to put text in it
-      marker.on('add', () => {
-        const el = marker.getElement();
-        if (el) {
-          const div = el.querySelector('div');
-          if (div) div.textContent = station.price;
-        }
-      });
-
-      marker.bindPopup(`
-        <div style="font-family: sans-serif;">
-          <strong style="color: #191919;">${station.name}</strong><br/>
-          <span style="color: #F15025; font-weight: 500;">${station.price}</span>
-        </div>
-      `);
-
-      marker.addTo(markersLayer);
-    });
-
-    // Clean up only when the component is actually destroyed
-    return () => {
-      if (!mapRef.current && mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
+    marker.on('add', () => {
+      const el = marker.getElement();
+      if (el) {
+        const div = el.querySelector('div');
+        if (div) div.textContent = station.price;
       }
-    };
-  }, [filteredStations]); // Dependency array is correct
+    });
 
+    marker.bindPopup(`
+      <div style="font-family: sans-serif;">
+        <strong style="color: #191919;">${station.name}</strong><br/>
+        <span style="color: #F15025; font-weight: 500;">${station.price}</span>
+      </div>
+    `);
+
+    marker.addTo(markersLayer);
+  });
+}, [displayStations]); // Re-run whenever the list changes
   useEffect(() => {
   // We convert the Set to an Array because JSON doesn't support Sets directly
   localStorage.setItem('gas_favorites', JSON.stringify(Array.from(favorites)));
@@ -110,30 +114,37 @@ export function FindCheapest({ context }: { context: AppContextType }) {
     setFavorites(newFavorites);
   };
 
-  return (
-    <div className="h-full flex flex-col bg-white">
+return (
+    <div className="h-full flex flex-col bg-white relative overflow-hidden">
       <div className="flex-1 pb-20 overflow-auto">
-        <div className="px-6 py-4 border-b border-[#CED0CE]">
+        {/* Search Bar Section */}
+        <div className="px-6 py-4 flex items-center gap-3 border-b border-[#CED0CE]">
           <input
             type="text"
-            value={`Within ${radius} mile radius`}
+            value={`Within ${range} miles`}
             onChange={(e) => {
-              const val = e.target.value.replace(/[^0-9]/g, '');
-              setRadius(val);
+              // Extract only the numbers from the input
+              const val = e.target.value.replace(/[^0-9.]/g, '');
+              setRange(val);
             }}
-            className="w-full px-4 py-2 border border-[#CED0CE] rounded-lg text-sm text-[#191919] focus:outline-none focus:border-[#F15025] focus:border-2"
+            className="flex-1 px-4 py-2 border border-[#CED0CE] rounded-lg text-sm text-[#191919] focus:outline-none focus:border-[#F15025] focus:border-2"
           />
+          <button className="p-2">
+            <Filter className="w-5 h-5 text-[#191919]" />
+          </button>
         </div>
 
         <div className="py-3">
-          <FilterPills onFilterChange={setActiveFilter} />
+          <FilterPills 
+    activeFilter={activeFilter} 
+    onFilterChange={setActiveFilter} 
+  />
         </div>
 
         <div ref={mapRef} className="h-64 w-full z-0" />
 
         <div className="px-6 py-4 space-y-3">
-          <div className="text-xs text-[#CED0CE] mb-2">Sorted by price (lowest first)</div>
-          {filteredStations.map((station) => (
+          {displayStations.map((station) => (
             <div key={station.id} className="relative">
               <div className="bg-white border border-[#CED0CE] rounded-xl p-3 space-y-2">
                 <div className="flex justify-between items-start gap-2">
@@ -142,10 +153,7 @@ export function FindCheapest({ context }: { context: AppContextType }) {
                     <div className="text-xs text-[#CED0CE]">{station.distance}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="text-right">
-                      <div className="text-lg text-[#F15025] font-medium">{station.price}</div>
-                      <div className="text-xs text-[#CED0CE]">per gallon</div>
-                    </div>
+                    <div className="text-sm text-[#F15025] font-medium">{station.price}</div>
                     <button onClick={() => toggleFavorite(station.id)} className="p-1">
                       <Star
                         className={`w-5 h-5 ${
@@ -157,22 +165,20 @@ export function FindCheapest({ context }: { context: AppContextType }) {
                     </button>
                   </div>
                 </div>
-                {station.lastUpdated && (
-                  <div className="text-xs text-[#CED0CE]">Last updated: {station.lastUpdated}</div>
-                )}
                 <div className="flex flex-wrap gap-2">
                   {station.tags.map((tag) => (
                     <span
                       key={tag}
-                      className={`px-2 py-1 text-xs rounded-full ${
-                        station.membersOnly && tag === 'Members only'
-                          ? 'bg-[#F15025] text-white'
-                          : 'bg-[#E6E8E6] text-[#191919]'
-                      }`}
+                      className="px-2 py-1 bg-[#E6E8E6] text-[#191919] text-xs rounded-full"
                     >
                       {tag}
                     </span>
                   ))}
+                  {station.membersOnly && (
+                    <span className="px-2 py-1 bg-[#F15025] text-white text-xs rounded-full">
+                      Members only
+                    </span>
+                  )}
                 </div>
               </div>
               {showConfirmation === station.id && (
@@ -182,19 +188,24 @@ export function FindCheapest({ context }: { context: AppContextType }) {
               )}
             </div>
           ))}
+          {displayStations.length === 0 && (
+            <div className="text-center py-10 text-[#CED0CE] text-sm">
+              No stations found within {range} miles.
+            </div>
+          )}
         </div>
       </div>
 
       <button
-              onClick={() => setShowChatbot(true)}
-              className="absolute bottom-20 right-6 w-14 h-14 bg-[#F15025] rounded-full flex items-center justify-center shadow-lg hover:bg-[#d9471f] transition-colors"
-            >
-              <MessageCircle className="w-6 h-6 text-white" />
-            </button>
-      
-            {showChatbot && <Chatbot onClose={() => setShowChatbot(false)} />}
-      
-            <BottomNav active="cheapest" />
+        onClick={() => setShowChatbot(true)}
+        className="absolute bottom-20 right-6 w-14 h-14 bg-[#F15025] rounded-full flex items-center justify-center shadow-lg hover:bg-[#d9471f] transition-colors"
+      >
+        <MessageCircle className="w-6 h-6 text-white" />
+      </button>
+
+      {showChatbot && <Chatbot onClose={() => setShowChatbot(false)} />}
+
+      <BottomNav active="cheapest" />
     </div>
   );
 }

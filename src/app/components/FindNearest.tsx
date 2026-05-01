@@ -27,82 +27,76 @@ export function FindNearest({ context }: { context: AppContextType }) {
   // 1. Parse distance string (e.g., "10") into a number
   const maxDistance = parseFloat(range) || 0;
 
-  // 2. Filter stations based on the Brand/Tag filter AND the Distance range
-  const displayStations = sortedStations.filter(station => {
-    // Extract the number from the distance string (e.g., "0.5 mi" -> 0.5)
-    const stationDist = parseFloat(station.distance.split(' ')[0]);
-    
-    // Check Distance
-    const isWithinRange = stationDist <= maxDistance;
-    
-    // Check Category/Brand Filter
-    const matchesFilter = activeFilter === 'All' || 
-                         station.name.includes(activeFilter) || 
-                         station.tags.includes(activeFilter);
+const displayStations = sortedStations.filter(station => {
+  // A: Distance Logic
+  const stationDist = parseFloat(station.distance.split(' ')[0]);
+  const isWithinRange = stationDist <= maxDistance;
+  
+  // B: Name/Tag Logic
+  // This checks if the station name or any of its tags match the active pill
+  const matchesFilter = activeFilter === 'All' || 
+                       station.name.includes(activeFilter) || 
+                       station.tags.includes(activeFilter);
 
-    return isWithinRange && matchesFilter;
+  // Both MUST be true to show the station
+  return isWithinRange && matchesFilter;
+});
+// 1. EFFECT: Initialize the Map (Runs ONLY once on mount)
+useEffect(() => {
+  if (!mapRef.current || mapInstanceRef.current) return;
+
+  const map = L.map(mapRef.current).setView([31.7765, -106.5012], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+  
+  mapInstanceRef.current = map;
+  markersLayerRef.current = L.layerGroup().addTo(map);
+
+  return () => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.remove();
+      mapInstanceRef.current = null;
+    }
+  };
+}, []); // Empty array = run only once
+
+// 2. EFFECT: Update Markers (Runs every time displayStations changes)
+useEffect(() => {
+  // Guard: We need the map and the layer to exist before drawing
+  if (!mapInstanceRef.current || !markersLayerRef.current) return;
+
+  const markersLayer = markersLayerRef.current;
+  markersLayer.clearLayers(); // Wipe old markers
+
+  const gasIcon = L.divIcon({
+    className: 'custom-gas-marker',
+    html: '<div style="background-color: #F15025; color: white; padding: 4px 8px; border-radius: 6px; font-size: 11px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></div>',
+    iconSize: [60, 24],
+    iconAnchor: [30, 12],
   });
 
-  useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return;
+  displayStations.forEach((station) => {
+    const marker = L.marker([station.lat, station.lng], { icon: gasIcon });
 
-    // 1. Initialize Map & LayerGroup once
-    if (!mapInstanceRef.current) {
-      const map = L.map(mapRef.current).setView([31.7765, -106.5012], 13);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap'
-      }).addTo(map);
-      
-      mapInstanceRef.current = map;
-      markersLayerRef.current = L.layerGroup().addTo(map);
-    }
-
-    const markersLayer = markersLayerRef.current;
-    if (!markersLayer) return;
-
-    // 2. Clear old markers before redrawing
-    markersLayer.clearLayers();
-    
-    // Create custom icon for gas stations
-    const gasIcon = L.divIcon({
-      className: 'custom-gas-marker',
-      html: '<div style="background-color: #F15025; color: white; padding: 4px 8px; border-radius: 6px; font-size: 11px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"></div>',
-      iconSize: [60, 24],
-      iconAnchor: [30, 12],
-    });
-
-    // 3. Add markers with an 'add' listener for the label
-    displayStations.forEach((station) => {
-      const marker = L.marker([station.lat, station.lng], { icon: gasIcon });
-
-      // This ensures the element exists before we try to put text in it
-      marker.on('add', () => {
-        const el = marker.getElement();
-        if (el) {
-          const div = el.querySelector('div');
-          if (div) div.textContent = station.price;
-        }
-      });
-
-      marker.bindPopup(`
-        <div style="font-family: sans-serif;">
-          <strong style="color: #191919;">${station.name}</strong><br/>
-          <span style="color: #F15025; font-weight: 500;">${station.price}</span>
-        </div>
-      `);
-
-      marker.addTo(markersLayer);
-    });
-
-    // Clean up only when the component is actually destroyed
-    return () => {
-      if (!mapRef.current && mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
-        mapInstanceRef.current = null;
+    marker.on('add', () => {
+      const el = marker.getElement();
+      if (el) {
+        const div = el.querySelector('div');
+        if (div) div.textContent = station.price;
       }
-    };
-  }, [displayStations]); // Dependency array is correct
+    });
 
+    marker.bindPopup(`
+      <div style="font-family: sans-serif;">
+        <strong style="color: #191919;">${station.name}</strong><br/>
+        <span style="color: #F15025; font-weight: 500;">${station.price}</span>
+      </div>
+    `);
+
+    marker.addTo(markersLayer);
+  });
+}, [displayStations]); // Re-run whenever the list changes
   useEffect(() => {
   // We convert the Set to an Array because JSON doesn't support Sets directly
   localStorage.setItem('gas_favorites', JSON.stringify(Array.from(favorites)));
@@ -141,7 +135,10 @@ return (
         </div>
 
         <div className="py-3">
-          <FilterPills />
+          <FilterPills 
+    activeFilter={activeFilter} 
+    onFilterChange={setActiveFilter} 
+  />
         </div>
 
         <div ref={mapRef} className="h-64 w-full z-0" />
