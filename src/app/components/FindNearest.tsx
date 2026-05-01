@@ -3,6 +3,7 @@ import { Filter, MessageCircle, Star } from 'lucide-react';
 import { AppContextType, Station } from '../App';
 import { BottomNav } from './BottomNav';
 import { FilterPills } from './FilterPills';
+import { Chatbot } from './Chatbot';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useGasStations } from '../../hooks/useGasStations';
@@ -16,17 +17,30 @@ export function FindNearest({ context }: { context: AppContextType }) {
   return saved ? new Set(JSON.parse(saved)) : new Set();
 });
   const [showConfirmation, setShowConfirmation] = useState<string | null>(null);
-    const [activeFilter, setActiveFilter] = useState('All');
+  const [activeFilter, setActiveFilter] = useState('All');
+  const [showChatbot, setShowChatbot] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
 
   // 2. Derive the stations to show
-  const filteredStations = sortedStations.filter(station => {
-    if (activeFilter === 'All') return true;
+  // 1. Parse distance string (e.g., "10") into a number
+  const maxDistance = parseFloat(range) || 0;
+
+  // 2. Filter stations based on the Brand/Tag filter AND the Distance range
+  const displayStations = sortedStations.filter(station => {
+    // Extract the number from the distance string (e.g., "0.5 mi" -> 0.5)
+    const stationDist = parseFloat(station.distance.split(' ')[0]);
     
-    // Check if the station name matches the brand filter OR if the tags contain the filter (like "Car Wash")
-    return station.name.includes(activeFilter) || station.tags.includes(activeFilter);
+    // Check Distance
+    const isWithinRange = stationDist <= maxDistance;
+    
+    // Check Category/Brand Filter
+    const matchesFilter = activeFilter === 'All' || 
+                         station.name.includes(activeFilter) || 
+                         station.tags.includes(activeFilter);
+
+    return isWithinRange && matchesFilter;
   });
 
   useEffect(() => {
@@ -58,7 +72,7 @@ export function FindNearest({ context }: { context: AppContextType }) {
     });
 
     // 3. Add markers with an 'add' listener for the label
-    filteredStations.forEach((station) => {
+    displayStations.forEach((station) => {
       const marker = L.marker([station.lat, station.lng], { icon: gasIcon });
 
       // This ensures the element exists before we try to put text in it
@@ -87,7 +101,7 @@ export function FindNearest({ context }: { context: AppContextType }) {
         mapInstanceRef.current = null;
       }
     };
-  }, [filteredStations]); // Dependency array is correct
+  }, [displayStations]); // Dependency array is correct
 
   useEffect(() => {
   // We convert the Set to an Array because JSON doesn't support Sets directly
@@ -106,15 +120,17 @@ export function FindNearest({ context }: { context: AppContextType }) {
     setFavorites(newFavorites);
   };
 
-  return (
-    <div className="h-full flex flex-col bg-white">
+return (
+    <div className="h-full flex flex-col bg-white relative overflow-hidden">
       <div className="flex-1 pb-20 overflow-auto">
+        {/* Search Bar Section */}
         <div className="px-6 py-4 flex items-center gap-3 border-b border-[#CED0CE]">
           <input
             type="text"
             value={`Within ${range} miles`}
             onChange={(e) => {
-              const val = e.target.value.replace(/[^0-9]/g, '');
+              // Extract only the numbers from the input
+              const val = e.target.value.replace(/[^0-9.]/g, '');
               setRange(val);
             }}
             className="flex-1 px-4 py-2 border border-[#CED0CE] rounded-lg text-sm text-[#191919] focus:outline-none focus:border-[#F15025] focus:border-2"
@@ -131,7 +147,7 @@ export function FindNearest({ context }: { context: AppContextType }) {
         <div ref={mapRef} className="h-64 w-full z-0" />
 
         <div className="px-6 py-4 space-y-3">
-          {sortedStations.map((station) => (
+          {displayStations.map((station) => (
             <div key={station.id} className="relative">
               <div className="bg-white border border-[#CED0CE] rounded-xl p-3 space-y-2">
                 <div className="flex justify-between items-start gap-2">
@@ -175,12 +191,22 @@ export function FindNearest({ context }: { context: AppContextType }) {
               )}
             </div>
           ))}
+          {displayStations.length === 0 && (
+            <div className="text-center py-10 text-[#CED0CE] text-sm">
+              No stations found within {range} miles.
+            </div>
+          )}
         </div>
       </div>
 
-      <button className="absolute bottom-20 right-6 w-14 h-14 bg-[#F15025] rounded-full flex items-center justify-center shadow-lg hover:bg-[#d9471f] transition-colors">
+      <button
+        onClick={() => setShowChatbot(true)}
+        className="absolute bottom-20 right-6 w-14 h-14 bg-[#F15025] rounded-full flex items-center justify-center shadow-lg hover:bg-[#d9471f] transition-colors"
+      >
         <MessageCircle className="w-6 h-6 text-white" />
       </button>
+
+      {showChatbot && <Chatbot onClose={() => setShowChatbot(false)} />}
 
       <BottomNav active="nearest" />
     </div>

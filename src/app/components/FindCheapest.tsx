@@ -3,6 +3,7 @@ import { MessageCircle, Star } from 'lucide-react';
 import { AppContextType, Station } from '../App';
 import { BottomNav } from './BottomNav';
 import { FilterPills } from './FilterPills';
+import { Chatbot } from './Chatbot';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useGasStations } from '../../hooks/useGasStations';
@@ -19,6 +20,7 @@ export function FindCheapest({ context }: { context: AppContextType }) {
 });
   const [showConfirmation, setShowConfirmation] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState('All');
+  const [showChatbot, setShowChatbot] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
@@ -183,11 +185,16 @@ export function FindCheapest({ context }: { context: AppContextType }) {
         </div>
       </div>
 
-      <button className="absolute bottom-20 right-6 w-14 h-14 bg-[#F15025] rounded-full flex items-center justify-center shadow-lg hover:bg-[#d9471f] transition-colors">
-        <MessageCircle className="w-6 h-6 text-white" />
-      </button>
-
-      <BottomNav active="cheapest" />
+      <button
+              onClick={() => setShowChatbot(true)}
+              className="absolute bottom-20 right-6 w-14 h-14 bg-[#F15025] rounded-full flex items-center justify-center shadow-lg hover:bg-[#d9471f] transition-colors"
+            >
+              <MessageCircle className="w-6 h-6 text-white" />
+            </button>
+      
+            {showChatbot && <Chatbot onClose={() => setShowChatbot(false)} />}
+      
+            <BottomNav active="cheapest" />
     </div>
   );
 }
